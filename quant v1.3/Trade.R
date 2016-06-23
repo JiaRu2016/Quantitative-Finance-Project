@@ -16,32 +16,30 @@
 # 4. 无视开盘的买入信号
 # 5. 可以多次买入。分批建仓 eg. 每次买入使用10%的资金
 
-rm(list = ls())
 require(data.table)
 require(magrittr)
 require(assertthat)
 require(ggplot2)
-
-load("dt.Rdata")
-
-stock_set <- c("000001")
+require(rlist)
 
 
-Trade <- function(
-  stock,   # a data.table / stock name, chr,  eg. "000001" 
-  insample,  # chr, length == 2, eg. c("2013-01-01", "2013-06-31")
-  outsample,  
-  Profit.rate = 0.05, Sell.rt.q = 0.1,  # Sell 信号 __or__
-  Stop.rate = 0.02,                  # Stop 信号
-  Buy.rt.q = 0.9, Buy.vol.q = 0.7,   # Buy 信号 __and__
-  # k = TRUE or int 10,     # 可多次买入。可设置分几批建仓
-  Tp1 = TRUE   # T + 1, 限制当日不能卖出 pass
+Trade <- function(stock,  # data.table
+                  insample,  # 
+                  outsample,
+                  Profit.rate = 0.05,  # 5% Profit-taking
+                  Stop.rate = 0.02,  # 2% Stop-loss
+                  Sell.rt.q = 0.1,  # return < 10% quantile, Sell
+                  Buy.rt.q = 0.9,  # (return > 90% quantile)&(vol > 70% quantile), Buy
+                  Buy.vol.q = 0.7,
+                  Tp1 = TRUE   # T + 1 pass..
+                  
 )
 {
   # 1.确认参数 ------------------------------------------
   insample <- as.Date(insample)
   outsample <- as.Date(outsample)
   
+  #browser()
   assert_that(
     #  stock参数：available, scalar
     # stock %in% stock_set,
@@ -79,16 +77,126 @@ Trade <- function(
                      Profit = integer(0),
                      Profit.w = integer(0),  
                      Stop = integer(0),
-                     Stop.w = integer(0))  
+                     Stop.w = integer(0), 
+                     Note = character(0))
+  book.wait <- book  # 买入当天不能交易，等待第二天交易的 waiting list
   j <- 1L  # index of `book``
   pst <- 0L  # positon
+  pool <- list() # 未平仓的交易集合。Data structure like "Set" 
+  
   for (i in 1:nrow(dt_trade)){
     L <- dt_trade[i, ] # L stands for "line"
     
-    # (1) Buy or Sell ?
+    # (0) 每一天的开始，先交易昨天的 waiting list 
+    # if (j==80) {
+    #   browser()
+    # }
+    if (L$MinTime == "0930" & nrow(book.wait) > 0) {
+      pst <- pst - nrow(book.wait)
+      pool <- pool[-which(pool %in% book.wait$index)] # 把要平仓的拿出pool集合
+      book.wait[, `:=`(index = 0L,
+                       date_time = L$DateTime,
+                       position = pst,
+                       Sell = -nrow(wait_sell),
+                       Profit = Profit - 1L,   # 0 - 1 = -1
+                       Stop = Stop - 1L,       # NA - 1 = NA
+                       Note = "yesterday")       
+                ] 
+      
+      book <- rbind(book, book.wait, fill = TRUE)
+      book.wait <- book.wait[!(1:nrow(book.wait))] #删掉所有行，保留结构
+    }
+    
+    # (1) Profit-taking
+    # 找出book中触及到profit-taking的交易的index
+    idx <- book[L$EndPrc > book$profit.point, index] 
+    idx <- idx[idx %in% pool]
+    if (length(idx) > 0){ # 如果有的话。。。
+      
+      for (idx_loop in idx){ # 遍历所有触及Profit-taking点的index
+        if(book[index == idx_loop, date_time] < L$DateTime){ 
+          #要Profit的一笔交易__不是__当天买入的
+          pst <- pst - 1L
+          pool <- pool[-which(pool %in% idx_loop)]
+          book_loop <- data.table(index = j,
+                                  date_time = L$DateTime, 
+                                  position = pst,
+                                  Profit = -1L,
+                                  Profit.w = idx_loop) # 'w' stands for 'which'
+          book <- rbind(book, book_loop, fill = TRUE)
+          j <- j + 1L
+          
+        } else if(book[index == idx_loop, date_time] == L$DateTime){ 
+          # 要Profit的一笔交易__是__当天买入的
+          # pst <- pst - 0L
+          # pool <- Pass...
+          book_loop <- data.table(index = j,
+                                  date_time = L$DateTime, 
+                                  position = pst, # 
+                                  Profit = 0L,  # 不能实际Profit，只添一条记录
+                                  Profit.w = idx_loop,  
+                                  Note = "Wait to profit")
+          book <- rbind(book, book_loop, fill = TRUE)
+          j <- j + 1L
+          
+          # 加入 waiting list
+          book.wait <- rbind(book.wait, book_loop, fill = TRUE)
+          
+        } else {
+          warning("foo")
+        }
+        
+      } # End for
+    } 
+    
+    
+    # (2) Stop-loss。
+    # 找出book中触及到Stop-loss的交易的index
+    idx <- book[L$EndPrc < book$stop.point, index] 
+    idx <- idx[idx %in% pool]
+    if (length(idx) > 0){ # 如果有的话。。。
+      
+      for (idx_loop in idx){ # 遍历所有触及Stop-loss点的index
+        if(book[index == idx_loop, date_time] < L$DateTime){ 
+          #要Stop的一笔交易__不是__当天买入的
+          pst <- pst - 1L
+          pool <- pool[-which(pool %in% idx_loop)]
+          book_loop <- data.table(index = j,
+                                  date_time = L$DateTime, 
+                                  position = pst,
+                                  Stop = -1L,
+                                  Stop.w = idx_loop) 
+          book <- rbind(book, book_loop, fill = TRUE)
+          j <- j + 1L
+          
+        } else if(book[index == idx_loop, date_time] == L$DateTime){ 
+          # 要Stop的一笔交易__是__当天买入的
+          # pst <- pst - 0L
+          # pool Pass...
+          book_loop <- data.table(index = j,
+                                  date_time = L$DateTime, 
+                                  position = pst, # 
+                                  Stop = 0L,  # 不能实际Stop，只添一条记录
+                                  Stop.w = idx_loop,  
+                                  Note = "Wait to stop")
+          book <- rbind(book, book_loop, fill = TRUE)
+          j <- j + 1L
+          
+          # 加入 waiting list
+          book.wait <- rbind(book.wait, book_loop, fill = TRUE)
+          
+        } else {
+          warning("foo_foo")
+        }
+        
+      } # End for
+    } 
+    
+    # (3) Buy or Sell ?
     if( L$return > Buy.rt & L$MinTime != "0930") {
       # Buy
       pst <- pst + 1L
+      pool <- c(pool, j)  # 加入pool集合
       book_loop <- data.table(index = j, 
                               date_time = L$DateTime,
                               position = pst,
@@ -98,35 +206,57 @@ Trade <- function(
       #browser()
       book <- rbind(book, book_loop, fill = TRUE)
       j <- j + 1L
+      
+      
     } else if (L$return < Sell.rt) {
       # Sell 
-      # 这里先不管 T+1 循环完了再改 group by TDate ....
+      to_sell <- book[index %in% pool]  # 找出book中尚未平仓的所有记录. length=0,1,2...
+      now_sell <- to_sell[as.Date(date_time) < L$TDate]
+      wait_sell <- to_sell[as.Date(date_time) == L$TDate]
+      
+      # now_sell
+      pst <- pst - nrow(now_sell)
       book_loop <- data.table(index = j,
                               date_time = L$DateTime,
-                              position = 0,
-                              Sell = -pst)
+                              position = pst,
+                              Sell = -nrow(now_sell))
       book <- rbind(book, book_loop, fill = TRUE)
-      pst <- 0L
+      pool <- pool[-which(pool %in% now_sell$index)]
       j <- j + 1L
+      
+      # wait_sell
+      book_loop <- data.table(index = j,
+                              date_time = L$DateTime, 
+                              position = pst, # 
+                              Sell = 0L,  # 不能实际Sell，只添一条记录
+                              Note = paste0("Wait to Sell", -nrow(wait_sell)))
+      book <- rbind(book, book_loop, fill = TRUE)
+      j <- j + 1L
+      book.wait <- rbind(book.wait, book_loop, fill = TRUE)
+      
     } else {
       # pass
     }
     
-    # (2) Profit-taking
-    # idx <- book[L$EndPrc > book$profit.point, index] 
-    # 
-    # (3) Stop-loss
+
     
-    
+    if (i%%100 == 0) message(round(i/nrow(dt_trade)*100), "%")
   }
   
   
   return(book)
 }
 
-a <- Trade(
-  dt,   # a data.table / stock name, chr,  eg. "000001" 
-  insample = c("2016-01-04", "2016-04-29"),
-  outsample = c("2016-05-01", "2016-05-15")  )
 
-a
+# # 单元测试
+# a <- Trade(
+#   dt,
+#   insample = c("2014-01-01", "2014-12-30"),
+#   outsample = c("2015-01-01", "2015-02-28"),
+#   Profit.rate = 0.05,
+#   Stop.rate = 0.02,
+#   Sell.rt.q = 0.001,
+#   Buy.rt.q = 0.9,
+#   Buy.vol.q = 0.7
+# )
+# a
