@@ -1,0 +1,46 @@
+---
+title: "Report"
+author: "Ru JIA"
+date: "2016年6月16日"
+output: 
+  html_document:
+    theme: readable
+    highlight: tango
+    toc: true
+    toc_float: true
+    section_number: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Read ME
+
+- 我把所有文件都打包在一个 R project 里面，可以用Rstudio打开文件 `quant v1.2.Rproj`
+- `Analysis_v1.2.R` 是数据读取和初步分析
+- `Trade_v1.2.R` 是交易策略函数
+- `dt.Rdata` 是一个读文件+整理后的阶段性成果，考虑到运行比较慢+跨平台问题，我直接把这个中间结果存成Rdata格式，以便在`Trade_v1.2.R`中可以直接load
+
+这个版本更新内容：
+
+1. 样本内/外起止的日期作为函数参数，可以调节。
+2. 原始数据不用excel了，直接从csv文件读取。文件夹`csvStockFiles`里面是合并好的股票数据csv文件，一只股票一个文件。目前只有一只股票"000001SH"，是我手工合并的（excel里复制粘贴,再另存为csv格式）后续可以添加更多。。。
+3. 做一个简单的交易策略：在out-of-sample 阶段,寻找奇异点,即超过90% 或者80%的quantile 的时间点作为买入信号。买入之后，5%收益率就卖出，2%亏损止损。
+
+
+# 文件`Analysis_v1.2.R`的运行结果
+
+（最后两行代码可以改样本内外起止时间参数：`when = ...`）
+
+```{r, code = readLines("Analysis_v1.2.R")}
+```
+
+
+# 文件`Trade_v1.2.R`的运行结果
+
+`# 测试 ========` 后面调用函数`Trade`可以使用不同的参数：`sell`, `stop`, `when`）
+
+```{r, code = readLines("Trade_v1.2.R")}
+```
+
