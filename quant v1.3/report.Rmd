@@ -1,0 +1,70 @@
+---
+title: "Report"
+author: "Ru JIA"
+date: "2016年6月24日"
+output: 
+  html_document:
+    theme: readable
+    highlight: tango
+    toc: true
+    toc_float: true
+    section_number: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# READ ME
+
+一共有三个`.R`文件和一个`dt.Rdata`文件：
+
+- `main.R` 是主程序，主程序中会`source`其他两个`.R`文件。
+- `Trade.R` 是交易策略函数
+- `Visualize.R` 是交易结果可视化函数
+- 为了避免读文件出问题，我还是像上次一样把清理好的股票数据放在`dt.Rdata`里面，在主程序里直接`load("dt.Rdata")`得到数据。只有一个股票“000001”。
+
+# 主程序运行结果
+
+首先调用`Trade`函数按照交易策略模拟交易过程。下面代码块中`Trade`函数中的所有参数都可以改：
+```{r}
+rm(list = ls())
+
+load("dt.Rdata")  # 000001 stock. class data.table 
+source("Trade.R")
+
+tradebook <- Trade(
+  dt,   # data.table
+  insample = c("2014-01-01", "2015-04-01"),  # 样本内时间范围
+  outsample = c("2015-04-01", "2015-04-30"),  # 样本外时间范围
+  # 注意时间顺序，否则会报错
+  Profit.rate = 0.05,  # 5% Profit-taking
+  Stop.rate = 0.02,  # 2% Stop-loss
+  Sell.rt.q = 0.001,  # return < 0.1% quantile, Sell
+  Buy.rt.q = 0.9,  # (return > 90% quantile)&(vol > 70% quantile), Buy
+  Buy.vol.q = 0.7
+)
+```
+
+变量`tradebook`中存储了每一条交易的明细，表格太长就不放在这里了，可以在Rstudio中查看。
+```{r, eval=FALSE}
+View(tradebook)
+```
+
+接下来是刚才交易过程的可视化，调用`Visualize`函数：
+```{r, warning=FALSE, fig.height=10, fig.width=12}
+source("Visualize.R")
+Visualize(tradebook, dt)
+```
+
+
+# 附1 `Trade.R` 文件内容
+
+```{r, code = readLines("Trade.R"), eval=FALSE}
+```
+
+
+# 附2 `Visualize.R` 文件内容
+```{r, code = readLines("Visualize.R") , eval=FALSE}
+```
+

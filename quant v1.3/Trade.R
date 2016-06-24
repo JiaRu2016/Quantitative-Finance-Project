@@ -21,6 +21,7 @@ require(magrittr)
 require(assertthat)
 require(ggplot2)
 require(rlist)
+require(stringr)
 
 
 Trade <- function(stock,  # data.table
@@ -88,11 +89,18 @@ Trade <- function(stock,  # data.table
     L <- dt_trade[i, ] # L stands for "line"
     
     # (0) 每一天的开始，先交易昨天的 waiting list 
-    # if (j==80) {
+    # if (j== 44) {
     #   browser()
     # }
     if (L$MinTime == "0930" & nrow(book.wait) > 0) {
-      pst <- pst - nrow(book.wait)
+      
+      wn <-
+        book.wait$Note[nrow(book.wait)] %>% 
+        str_extract("\\d{1,3}") %>% 
+        as.integer() %>% 
+        sum()
+      pst <- pst - wn
+      
       pool <- pool[-which(pool %in% book.wait$index)] # 把要平仓的拿出pool集合
       book.wait[, `:=`(index = 0L,
                        date_time = L$DateTime,
@@ -103,7 +111,7 @@ Trade <- function(stock,  # data.table
                        Note = "yesterday")       
                 ] 
       
-      book <- rbind(book, book.wait, fill = TRUE)
+      book <- rbind(book, tail(book.wait, 1), fill = TRUE)
       book.wait <- book.wait[!(1:nrow(book.wait))] #删掉所有行，保留结构
     }
     
@@ -221,7 +229,10 @@ Trade <- function(stock,  # data.table
                               position = pst,
                               Sell = -nrow(now_sell))
       book <- rbind(book, book_loop, fill = TRUE)
-      pool <- pool[-which(pool %in% now_sell$index)]
+      if(j == 44) {
+        browser()
+      }
+      pool <- pool[!(pool %in% now_sell$index)]
       j <- j + 1L
       
       # wait_sell
@@ -243,20 +254,24 @@ Trade <- function(stock,  # data.table
     if (i%%100 == 0) message(round(i/nrow(dt_trade)*100), "%")
   }
   
+  book[, `:=`(profit.point = NULL, stop.point = NULL)]
+  attr(book, "out_sample_range") <- outsample
   
   return(book)
 }
 
 
-# # 单元测试
+# 单元测试
+# # debug(Trade)
 # a <- Trade(
-#   dt,
-#   insample = c("2014-01-01", "2014-12-30"),
-#   outsample = c("2015-01-01", "2015-02-28"),
-#   Profit.rate = 0.05,
-#   Stop.rate = 0.02,
-#   Sell.rt.q = 0.001,
-#   Buy.rt.q = 0.9,
+#   dt,   # data.table
+#   insample = c("2014-01-01", "2015-04-01"),  # 样本内时间范围
+#   outsample = c("2015-04-01", "2015-04-30"),  # 样本外时间范围
+#   # 注意时间顺序，否则会报错
+#   Profit.rate = 0.05,  # 5% Profit-taking
+#   Stop.rate = 0.02,  # 2% Stop-loss
+#   Sell.rt.q = 0.001,  # return < 0.1% quantile, Sell
+#   Buy.rt.q = 0.9,  # (return > 90% quantile)&(vol > 70% quantile), Buy
 #   Buy.vol.q = 0.7
 # )
 # a
